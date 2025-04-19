@@ -32,6 +32,10 @@ RUN mkdir -p /usr/local/share/npm-global && \
 
 ARG USERNAME=node
 
+# Create a user with sudo privileges
+RUN useradd -m sudonode && \
+    echo "sudonode ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    
 # Set up non-root user
 USER node
 

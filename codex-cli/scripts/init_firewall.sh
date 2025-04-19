@@ -1,12 +1,19 @@
 #!/bin/bash
 set -euo pipefail  # Exit on error, undefined vars, and pipeline failures
 IFS=$'\n\t'       # Stricter word splitting
-# Optional flag to allow outbound traffic without restrictions
+
+# Dangerous flag to allow outbound traffic without restrictions
 ALLOW_OUTBOUND=false
-if [ "${1:-}" = "--dangerously-allow-network-outbound" ]; then
-  ALLOW_OUTBOUND=true
-  shift
-fi
+for arg in "$@"; do
+    case "$arg" in
+        --dangerously-allow-network-outbound)
+            ALLOW_OUTBOUND=true
+            ;;
+        *)
+            echo "Unknown option: $arg"
+            ;;
+    esac
+done
 
 # Flush existing rules and delete existing ipsets
 iptables -F
