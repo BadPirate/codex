@@ -24,6 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   unzip \
   ripgrep \
   zsh \
+  # Docker-in-Docker support
+  docker.io \
   && rm -rf /var/lib/apt/lists/*
 
 # Ensure default node user has access to /usr/local/share
@@ -35,7 +37,12 @@ ARG USERNAME=node
 # Create a user with sudo privileges
 RUN useradd -m sudonode && \
     echo "sudonode ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-    
+
+# Add 'node' and 'sudonode' users to the 'docker' group for Docker daemon access
+RUN groupadd -f docker && \
+    usermod -aG docker node && \
+    usermod -aG docker sudonode
+
 # Set up non-root user
 USER node
 
@@ -55,6 +62,6 @@ RUN npm install -g codex.tgz \
 COPY scripts/init_firewall.sh /usr/local/bin/
 USER root
 RUN chmod +x /usr/local/bin/init_firewall.sh && \
-  echo "node ALL=(root) NOPASSWD: /usr/local/bin/init_firewall.sh" > /etc/sudoers.d/node-firewall && \
+  echo "node ALL=(root) NOPASSWD: /usr/local/bin/init_firewall.sh, /usr/bin/dockerd" > /etc/sudoers.d/node-firewall && \
   chmod 0440 /etc/sudoers.d/node-firewall
 USER node
