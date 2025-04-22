@@ -15,6 +15,8 @@ WORK_DIR="${WORKSPACE_ROOT_DIR:-$(pwd)}"
 ALLOW_OUTBOUND=false
 # By default, do not allow sudo execution via sudonode
 ALLOW_SUDO=false
+# By default, do not enable Docker-in-Docker
+ALLOW_DIND=false
 
 # Parse optional flags:
 while [ "$#" -gt 0 ]; do
@@ -31,6 +33,13 @@ while [ "$#" -gt 0 ]; do
       # Allow both outbound network and sudo inside container
       ALLOW_OUTBOUND=true
       ALLOW_SUDO=true
+      # Also allow Docker-in-Docker
+      ALLOW_DIND=true
+      shift
+      ;;
+    --allow-docker-in-docker)
+      # Enable Docker-in-Docker (nested daemon)
+      ALLOW_DIND=true
       shift
       ;;
     --work_dir)
@@ -78,17 +87,34 @@ if [ -z "$WORK_DIR" ]; then
   exit 1
 fi
 
-# Kill any existing container for the working directory using cleanup(), centralizing removal logic.
+## Kill any existing container for the working directory
 cleanup
 
+# Determine extra docker run options (e.g., privileged for Docker-in-Docker)
+DOCKER_RUN_OPTS=""
+if [ "$ALLOW_DIND" = true ]; then
+  echo "Enabling nested Docker-in-Docker (privileged mode) in container..."
+  # Run privileged and set Docker host for nested daemon
+  DOCKER_RUN_OPTS="--privileged -e DOCKER_HOST=unix:///var/run/docker.sock"
+fi
+
 # Run the container with the specified directory mounted at the same path inside the container.
-docker run --name "$CONTAINER_NAME" -d \
+docker run $DOCKER_RUN_OPTS --name "$CONTAINER_NAME" -d \
   -e OPENAI_API_KEY \
   --cap-add=NET_ADMIN \
   --cap-add=NET_RAW \
   -v "$WORK_DIR:/app$WORK_DIR" \
   codex \
   sleep infinity
+
+# If Docker-in-Docker enabled, start a nested Docker daemon inside the container
+if [ "$ALLOW_DIND" = true ]; then
+  echo "Starting Docker daemon inside container..."
+  docker exec -u sudonode "$CONTAINER_NAME" bash -c \
+    "sudo touch /var/log/dockerd.log && sudo chmod 666 /var/log/dockerd.log && \
+     nohup sudo -n dockerd --host unix:///var/run/docker.sock --storage-driver vfs \
+     > /var/log/dockerd.log 2>&1 &"
+fi
 
 # Initialize the firewall inside the container, with optional allow-outbound flag
 FIREWALL_CMD="sudo /usr/local/bin/init_firewall.sh"
