@@ -30,5 +30,5 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true
   },
-  "include": ["src", "tests", "bin"]
+  "include": ["src", "tests"]
 }

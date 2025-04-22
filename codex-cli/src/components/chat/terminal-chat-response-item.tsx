@@ -1,4 +1,3 @@
-import type { OverlayModeType } from "./terminal-chat";
 import type { TerminalRendererOptions } from "marked-terminal";
 import type {
   ResponseFunctionToolCallItem,
@@ -15,25 +14,18 @@ import chalk, { type ForegroundColorName } from "chalk";
 import { Box, Text } from "ink";
 import { parse, setOptions } from "marked";
 import TerminalRenderer from "marked-terminal";
-import React, { useEffect, useMemo } from "react";
+import React, { useMemo } from "react";
 
 export default function TerminalChatResponseItem({
   item,
   fullStdout = false,
-  setOverlayMode,
 }: {
   item: ResponseItem;
   fullStdout?: boolean;
-  setOverlayMode?: React.Dispatch<React.SetStateAction<OverlayModeType>>;
 }): React.ReactElement {
   switch (item.type) {
     case "message":
-      return (
-        <TerminalChatResponseMessage
-          setOverlayMode={setOverlayMode}
-          message={item}
-        />
-      );
+      return <TerminalChatResponseMessage message={item} />;
     case "function_call":
       return <TerminalChatResponseToolCall message={item} />;
     case "function_call_output":
@@ -106,23 +98,9 @@ const colorsByRole: Record<string, ForegroundColorName> = {
 
 function TerminalChatResponseMessage({
   message,
-  setOverlayMode,
 }: {
   message: ResponseInputMessageItem | ResponseOutputMessage;
-  setOverlayMode?: React.Dispatch<React.SetStateAction<OverlayModeType>>;
 }) {
-  // auto switch to model mode if the system message contains "has been deprecated"
-  useEffect(() => {
-    if (message.role === "system") {
-      const systemMessage = message.content.find(
-        (c) => c.type === "input_text",
-      )?.text;
-      if (systemMessage?.includes("model_not_found")) {
-        setOverlayMode?.("model");
-      }
-    }
-  }, [message, setOverlayMode]);
-
   return (
     <Box flexDirection="column">
       <Text bold color={colorsByRole[message.role] || "gray"}>

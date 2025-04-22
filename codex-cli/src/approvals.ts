@@ -135,8 +135,8 @@ export function canAutoApprove(
     // bashCmd could be a mix of strings and operators, e.g.:
     //   "ls || (true && pwd)" => [ 'ls', { op: '||' }, '(', 'true', { op: '&&' }, 'pwd', ')' ]
     // We try to ensure that *every* command segment is deemed safe and that
-    // all operators belong to an allow-list. If so, the entire expression is
-    // considered auto-approvable.
+    // all operators belong to an allow‑list. If so, the entire expression is
+    // considered auto‑approvable.
 
     const shellSafe = isEntireShellExpressionSafe(bashCmd);
     if (shellSafe != null) {
@@ -314,7 +314,7 @@ export function isSafeCommand(
       };
     case "true":
       return {
-        reason: "No-op (true)",
+        reason: "No‑op (true)",
         group: "Utility",
       };
     case "echo":
@@ -329,20 +329,11 @@ export function isSafeCommand(
         reason: "Ripgrep search",
         group: "Searching",
       };
-    case "find": {
-      // Certain options to `find` allow executing arbitrary processes, so we
-      // cannot auto-approve them.
-      if (
-        command.some((arg: string) => UNSAFE_OPTIONS_FOR_FIND_COMMAND.has(arg))
-      ) {
-        break;
-      } else {
-        return {
-          reason: "Find files or directories",
-          group: "Searching",
-        };
-      }
-    }
+    case "find":
+      return {
+        reason: "Find files or directories",
+        group: "Searching",
+      };
     case "grep":
       return {
         reason: "Text search (grep)",
@@ -430,27 +421,12 @@ function isValidSedNArg(arg: string | undefined): boolean {
   return arg != null && /^(\d+,)?\d+p$/.test(arg);
 }
 
-const UNSAFE_OPTIONS_FOR_FIND_COMMAND: ReadonlySet<string> = new Set([
-  // Options that can execute arbitrary commands.
-  "-exec",
-  "-execdir",
-  "-ok",
-  "-okdir",
-  // Option that deletes matching files.
-  "-delete",
-  // Options that write pathnames to a file.
-  "-fls",
-  "-fprint",
-  "-fprint0",
-  "-fprintf",
-]);
-
 // ---------------- Helper utilities for complex shell expressions -----------------
 
-// A conservative allow-list of bash operators that do not, on their own, cause
+// A conservative allow‑list of bash operators that do not, on their own, cause
 // side effects. Redirections (>, >>, <, etc.) and command substitution `$()`
 // are intentionally excluded. Parentheses used for grouping are treated as
-// strings by `shell-quote`, so we do not add them here. Reference:
+// strings by `shell‑quote`, so we do not add them here. Reference:
 // https://github.com/substack/node-shell-quote#parsecmd-opts
 const SAFE_SHELL_OPERATORS: ReadonlySet<string> = new Set([
   "&&", // logical AND
@@ -476,7 +452,7 @@ function isEntireShellExpressionSafe(
   }
 
   try {
-    // Collect command segments delimited by operators. `shell-quote` represents
+    // Collect command segments delimited by operators. `shell‑quote` represents
     // subshell grouping parentheses as literal strings "(" and ")"; treat them
     // as unsafe to keep the logic simple (since subshells could introduce
     // unexpected scope changes).
@@ -544,7 +520,7 @@ function isParseEntryWithOp(
   return (
     typeof entry === "object" &&
     entry != null &&
-    // Using the safe `in` operator keeps the check property-safe even when
+    // Using the safe `in` operator keeps the check property‑safe even when
     // `entry` is a `string`.
     "op" in entry &&
     typeof (entry as { op?: unknown }).op === "string"

@@ -1,8 +1,6 @@
 import * as esbuild from "esbuild";
 import * as fs from "fs";
 import * as path from "path";
-
-const OUT_DIR = 'dist'
 /**
  * ink attempts to import react-devtools-core in an ESM-unfriendly way:
  *
@@ -41,11 +39,6 @@ const isDevBuild =
 
 const plugins = [ignoreReactDevToolsPlugin];
 
-// Build Hygiene, ensure we drop previous dist dir and any leftover files
-const outPath = path.resolve(OUT_DIR);
-if (fs.existsSync(outPath)) {
-  fs.rmSync(outPath, { recursive: true, force: true });
-}
 
 // Add a shebang that enables source‑map support for dev builds so that stack
 // traces point to the original TypeScript lines without requiring callers to
@@ -57,7 +50,7 @@ if (isDevBuild) {
     name: "dev-shebang",
     setup(build) {
       build.onEnd(async () => {
-        const outFile = path.resolve(isDevBuild ? `${OUT_DIR}/cli-dev.js` : `${OUT_DIR}/cli.js`);
+        const outFile = path.resolve(isDevBuild ? "dist/cli-dev.js" : "dist/cli.js");
         let code = await fs.promises.readFile(outFile, "utf8");
         if (code.startsWith("#!")) {
           code = code.replace(/^#!.*\n/, devShebangLine);
@@ -76,7 +69,7 @@ esbuild
     format: "esm",
     platform: "node",
     tsconfig: "tsconfig.json",
-    outfile: isDevBuild ? `${OUT_DIR}/cli-dev.js` : `${OUT_DIR}/cli.js`,
+    outfile: isDevBuild ? "dist/cli-dev.js" : "dist/cli.js",
     minify: !isDevBuild,
     sourcemap: isDevBuild ? "inline" : true,
     plugins,

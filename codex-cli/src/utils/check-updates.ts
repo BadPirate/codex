@@ -1,17 +1,21 @@
-import type { AgentName } from "package-manager-detector";
-
-import { detectInstallerByPath } from "./package-manager-detector";
-import { CLI_VERSION } from "./session";
+import { CONFIG_DIR } from "./config";
 import boxen from "boxen";
 import chalk from "chalk";
-import { getLatestVersion } from "fast-npm-meta";
+import * as cp from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getUserAgent } from "package-manager-detector";
-import semver from "semver";
+import which from "which";
 
 interface UpdateCheckState {
   lastUpdateCheck?: string;
+}
+
+interface PackageInfo {
+  current: string;
+  wanted: string;
+  latest: string;
+  dependent: string;
+  location: string;
 }
 
 interface UpdateCheckInfo {
@@ -19,63 +23,65 @@ interface UpdateCheckInfo {
   latestVersion: string;
 }
 
-export interface UpdateOptions {
-  manager: AgentName;
-  packageName: string;
-}
-
 const UPDATE_CHECK_FREQUENCY = 1000 * 60 * 60 * 24; // 1 day
 
-export function renderUpdateCommand({
-  manager,
-  packageName,
-}: UpdateOptions): string {
-  const updateCommands: Record<AgentName, string> = {
-    npm: `npm install -g ${packageName}`,
-    pnpm: `pnpm add -g ${packageName}`,
-    bun: `bun add -g ${packageName}`,
-    /** Only works in yarn@v1 */
-    yarn: `yarn global add ${packageName}`,
-    deno: `deno install -g npm:${packageName}`,
-  };
-
-  return updateCommands[manager];
-}
-
-function renderUpdateMessage(options: UpdateOptions) {
-  const updateCommand = renderUpdateCommand(options);
-  return `To update, run ${chalk.magenta(updateCommand)} to update.`;
-}
-
-async function writeState(stateFilePath: string, state: UpdateCheckState) {
-  await writeFile(stateFilePath, JSON.stringify(state, null, 2), {
-    encoding: "utf8",
-  });
-}
-
-async function getUpdateCheckInfo(
-  packageName: string,
-): Promise<UpdateCheckInfo | undefined> {
-  const metadata = await getLatestVersion(packageName, {
-    force: true,
-    throw: false,
-  });
-
-  if ("error" in metadata || !metadata?.version) {
-    return;
+export async function getNPMCommandPath(): Promise<string | undefined> {
+  try {
+    return await which(process.platform === "win32" ? "npm.cmd" : "npm");
+  } catch {
+    return undefined;
   }
+}
 
-  return {
-    currentVersion: CLI_VERSION,
-    latestVersion: metadata.version,
-  };
+export async function checkOutdated(
+  npmCommandPath: string,
+): Promise<UpdateCheckInfo | undefined> {
+  return new Promise((resolve, _reject) => {
+    // TODO: support local installation
+    // Right now we're using "--global", which only checks global packages.
+    // But codex might be installed locally — we should check the local version first,
+    // and only fall back to the global one if needed.
+    const args = ["outdated", "--global", "--json", "--", "@openai/codex"];
+    // corepack npm wrapper would automatically update package.json. disable that behavior.
+    // COREPACK_ENABLE_AUTO_PIN disables the package.json overwrite, and
+    // COREPACK_ENABLE_PROJECT_SPEC makes the npm view command succeed
+    //   even if packageManager specified a package manager other than npm.
+    const env = {
+      ...process.env,
+      COREPACK_ENABLE_AUTO_PIN: "0",
+      COREPACK_ENABLE_PROJECT_SPEC: "0",
+    };
+    let options: cp.ExecFileOptions = { env };
+    let commandPath = npmCommandPath;
+    if (process.platform === "win32") {
+      options = { ...options, shell: true };
+      commandPath = `"${npmCommandPath}"`;
+    }
+    cp.execFile(commandPath, args, options, async (_error, stdout) => {
+      try {
+        const { name: packageName } = await import("../../package.json");
+        const content: Record<string, PackageInfo> = JSON.parse(stdout);
+        if (!content[packageName]) {
+          // package not installed or not outdated
+          resolve(undefined);
+          return;
+        }
+
+        const currentVersion = content[packageName].current;
+        const latestVersion = content[packageName].latest;
+
+        resolve({ currentVersion, latestVersion });
+        return;
+      } catch {
+        // ignore
+      }
+      resolve(undefined);
+    });
+  });
 }
 
 export async function checkForUpdates(): Promise<void> {
-  const { CONFIG_DIR } = await import("./config");
   const stateFile = join(CONFIG_DIR, "update-check.json");
-
-  // Load previous check timestamp
   let state: UpdateCheckState | undefined;
   try {
     state = JSON.parse(await readFile(stateFile, "utf8"));
@@ -83,7 +89,6 @@ export async function checkForUpdates(): Promise<void> {
     // ignore
   }
 
-  // Bail out if we checked less than the configured frequency ago
   if (
     state?.lastUpdateCheck &&
     Date.now() - new Date(state.lastUpdateCheck).valueOf() <
@@ -92,39 +97,25 @@ export async function checkForUpdates(): Promise<void> {
     return;
   }
 
-  // Fetch current vs latest from the registry
-  const { name: packageName } = await import("../../package.json");
-  const packageInfo = await getUpdateCheckInfo(packageName);
+  const npmCommandPath = await getNPMCommandPath();
+  if (!npmCommandPath) {
+    return;
+  }
+
+  const packageInfo = await checkOutdated(npmCommandPath);
 
   await writeState(stateFile, {
     ...state,
     lastUpdateCheck: new Date().toUTCString(),
   });
 
-  if (
-    !packageInfo ||
-    !semver.gt(packageInfo.latestVersion, packageInfo.currentVersion)
-  ) {
+  if (!packageInfo) {
     return;
   }
 
-  // Detect global installer
-  let managerName = await detectInstallerByPath();
-
-  // Fallback to the local package manager
-  if (!managerName) {
-    const local = getUserAgent();
-    if (!local) {
-      // No package managers found, skip it.
-      return;
-    }
-    managerName = local;
-  }
-
-  const updateMessage = renderUpdateMessage({
-    manager: managerName,
-    packageName,
-  });
+  const updateMessage = `To update, run: ${chalk.cyan(
+    "npm install -g @openai/codex",
+  )} to update.`;
 
   const box = boxen(
     `\
@@ -143,4 +134,10 @@ ${updateMessage}`,
 
   // eslint-disable-next-line no-console
   console.log(box);
+}
+
+async function writeState(stateFilePath: string, state: UpdateCheckState) {
+  await writeFile(stateFilePath, JSON.stringify(state, null, 2), {
+    encoding: "utf8",
+  });
 }

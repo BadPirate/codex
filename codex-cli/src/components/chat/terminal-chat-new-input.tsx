@@ -8,15 +8,16 @@ import type {
 
 import MultilineTextEditor from "./multiline-editor";
 import { TerminalChatCommandReview } from "./terminal-chat-command-review.js";
+import { log, isLoggingEnabled } from "../../utils/agent/log.js";
 import { loadConfig } from "../../utils/config.js";
 import { createInputItem } from "../../utils/input-utils.js";
-import { log } from "../../utils/logger/log.js";
 import { setSessionId } from "../../utils/session.js";
 import {
   loadCommandHistory,
   addToHistory,
 } from "../../utils/storage/command-history.js";
 import { clearTerminal, onExit } from "../../utils/terminal.js";
+import Spinner from "../vendor/ink-spinner.js";
 import { Box, Text, useApp, useInput, useStdin } from "ink";
 import { fileURLToPath } from "node:url";
 import React, { useCallback, useState, Fragment, useEffect } from "react";
@@ -36,7 +37,39 @@ const typeHelpText = `ctrl+c to exit | "/clear" to reset context | "/help" for c
 const DEBUG_HIST =
   process.env["DEBUG_TCI"] === "1" || process.env["DEBUG_TCI"] === "true";
 
-// Placeholder for potential dynamic prompts – currently not used.
+const thinkingTexts = ["Thinking"]; /* [
+  "Consulting the rubber duck",
+  "Maximizing paperclips",
+  "Reticulating splines",
+  "Immanentizing the Eschaton",
+  "Thinking",
+  "Thinking about thinking",
+  "Spinning in circles",
+  "Counting dust specks",
+  "Updating priors",
+  "Feeding the utility monster",
+  "Taking off",
+  "Wireheading",
+  "Counting to infinity",
+  "Staring into the Basilisk",
+  "Running acausal tariff negotiations",
+  "Searching the library of babel",
+  "Multiplying matrices",
+  "Solving the halting problem",
+  "Counting grains of sand",
+  "Simulating a simulation",
+  "Asking the oracle",
+  "Detangling qubits",
+  "Reading tea leaves",
+  "Pondering universal love and transcendent joy",
+  "Feeling the AGI",
+  "Shaving the yak",
+  "Escaping local minima",
+  "Pruning the search tree",
+  "Descending the gradient",
+  "Painting the bikeshed",
+  "Securing funding",
+]; */
 
 export default function TerminalChatInput({
   isNew: _isNew,
@@ -52,10 +85,8 @@ export default function TerminalChatInput({
   openModelOverlay,
   openApprovalOverlay,
   openHelpOverlay,
-  openDiffOverlay,
   interruptAgent,
   active,
-  thinkingSeconds,
 }: {
   isNew: boolean;
   loading: boolean;
@@ -73,10 +104,8 @@ export default function TerminalChatInput({
   openModelOverlay: () => void;
   openApprovalOverlay: () => void;
   openHelpOverlay: () => void;
-  openDiffOverlay: () => void;
   interruptAgent: () => void;
   active: boolean;
-  thinkingSeconds: number;
 }): React.ReactElement {
   const app = useApp();
   const [selectedSuggestion, setSelectedSuggestion] = useState<number>(0);
@@ -232,12 +261,6 @@ export default function TerminalChatInput({
         return;
       }
 
-      if (inputValue === "/diff") {
-        setInput("");
-        openDiffOverlay();
-        return;
-      }
-
       if (inputValue.startsWith("/model")) {
         setInput("");
         openModelOverlay();
@@ -263,16 +286,17 @@ export default function TerminalChatInput({
         setInput("");
         setSessionId("");
         setLastResponseId("");
-        // Clear the terminal screen (including scrollback) before resetting context
         clearTerminal();
 
-        // Print a clear confirmation and reset conversation items.
-        setItems([
+        // Emit a system message to confirm the clear action.  We *append*
+        // it so Ink's <Static> treats it as new output and actually renders it.
+        setItems((prev) => [
+          ...prev,
           {
             id: `clear-${Date.now()}`,
             type: "message",
             role: "system",
-            content: [{ type: "input_text", text: "Terminal cleared" }],
+            content: [{ type: "input_text", text: "Context cleared" }],
           },
         ]);
 
@@ -344,7 +368,6 @@ export default function TerminalChatInput({
       openApprovalOverlay,
       openModelOverlay,
       openHelpOverlay,
-      openDiffOverlay,
       history, // Add history to the dependency array
     ],
   );
@@ -354,11 +377,7 @@ export default function TerminalChatInput({
       <TerminalChatCommandReview
         confirmationPrompt={confirmationPrompt}
         onReviewCommand={submitConfirmation}
-        // allow switching approval mode via 'v'
-        onSwitchApprovalMode={openApprovalOverlay}
         explanation={explanation}
-        // disable when input is inactive (e.g., overlay open)
-        isActive={active}
       />
     );
   }
@@ -370,7 +389,6 @@ export default function TerminalChatInput({
           <TerminalChatInputThinking
             onInterrupt={interruptAgent}
             active={active}
-            thinkingSeconds={thinkingSeconds}
           />
         </Box>
       ) : (
@@ -436,43 +454,15 @@ export default function TerminalChatInput({
 function TerminalChatInputThinking({
   onInterrupt,
   active,
-  thinkingSeconds,
 }: {
   onInterrupt: () => void;
   active: boolean;
-  thinkingSeconds: number;
 }) {
-  const [awaitingConfirm, setAwaitingConfirm] = useState(false);
   const [dots, setDots] = useState("");
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false);
 
-  // Animate ellipsis
-  useInterval(() => {
-    setDots((prev) => (prev.length < 3 ? prev + "." : ""));
-  }, 500);
-
-  // Spinner frames with seconds embedded
-  const ballFrames = [
-    "( ●    )",
-    "(  ●   )",
-    "(   ●  )",
-    "(    ● )",
-    "(     ●)",
-    "(    ● )",
-    "(   ●  )",
-    "(  ●   )",
-    "( ●    )",
-    "(●     )",
-  ];
-  const [frame, setFrame] = useState(0);
-
-  useInterval(() => {
-    setFrame((idx) => (idx + 1) % ballFrames.length);
-  }, 80);
-
-  const frameTemplate = ballFrames[frame] ?? ballFrames[0];
-  const frameWithSeconds = (frameTemplate as string).replace(
-    "●",
-    `●${thinkingSeconds}s`,
+  const [thinkingText] = useState(
+    () => thinkingTexts[Math.floor(Math.random() * thinkingTexts.length)],
   );
 
   // ---------------------------------------------------------------------
@@ -504,9 +494,11 @@ function TerminalChatInputThinking({
       const str = Buffer.isBuffer(data) ? data.toString("utf8") : data;
       if (str === "\x1b\x1b") {
         // Treat as the first Escape press – prompt the user for confirmation.
-        log(
-          "raw stdin: received collapsed ESC ESC – starting confirmation timer",
-        );
+        if (isLoggingEnabled()) {
+          log(
+            "raw stdin: received collapsed ESC ESC – starting confirmation timer",
+          );
+        }
         setAwaitingConfirm(true);
         setTimeout(() => setAwaitingConfirm(false), 1500);
       }
@@ -519,7 +511,9 @@ function TerminalChatInputThinking({
     };
   }, [stdin, awaitingConfirm, onInterrupt, active, setRawMode]);
 
-  // Elapsed time provided via props – no local interval needed.
+  useInterval(() => {
+    setDots((prev) => (prev.length < 3 ? prev + "." : ""));
+  }, 500);
 
   useInput(
     (_input, key) => {
@@ -528,11 +522,15 @@ function TerminalChatInputThinking({
       }
 
       if (awaitingConfirm) {
-        log("useInput: second ESC detected – triggering onInterrupt()");
+        if (isLoggingEnabled()) {
+          log("useInput: second ESC detected – triggering onInterrupt()");
+        }
         onInterrupt();
         setAwaitingConfirm(false);
       } else {
-        log("useInput: first ESC detected – waiting for confirmation");
+        if (isLoggingEnabled()) {
+          log("useInput: first ESC detected – waiting for confirmation");
+        }
         setAwaitingConfirm(true);
         setTimeout(() => setAwaitingConfirm(false), 1500);
       }
@@ -543,9 +541,9 @@ function TerminalChatInputThinking({
   return (
     <Box flexDirection="column" gap={1}>
       <Box gap={2}>
-        <Text>{frameWithSeconds}</Text>
+        <Spinner type="ball" />
         <Text>
-          Thinking
+          {thinkingText}
           {dots}
         </Text>
       </Box>

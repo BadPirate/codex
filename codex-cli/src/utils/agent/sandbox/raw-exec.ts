@@ -7,11 +7,12 @@ import type {
   StdioPipe,
 } from "child_process";
 
-import { log } from "../../logger/log.js";
+import { log, isLoggingEnabled } from "../log.js";
 import { adaptCommandForPlatform } from "../platform-commands.js";
-import { createTruncatingCollector } from "./create-truncating-collector";
 import { spawn } from "child_process";
 import * as os from "os";
+
+const MAX_BUFFER = 1024 * 100; // 100 KB
 
 /**
  * This function should never return a rejected promise: errors should be
@@ -20,13 +21,16 @@ import * as os from "os";
 export function exec(
   command: Array<string>,
   options: SpawnOptions,
-  _writableRoots: ReadonlyArray<string>,
+  _writableRoots: Array<string>,
   abortSignal?: AbortSignal,
 ): Promise<ExecResult> {
   // Adapt command for the current platform (e.g., convert 'ls' to 'dir' on Windows)
   const adaptedCommand = adaptCommandForPlatform(command);
 
-  if (JSON.stringify(adaptedCommand) !== JSON.stringify(command)) {
+  if (
+    isLoggingEnabled() &&
+    JSON.stringify(adaptedCommand) !== JSON.stringify(command)
+  ) {
     log(
       `Command adapted for platform: ${command.join(
         " ",
@@ -91,7 +95,9 @@ export function exec(
   // timely fashion.
   if (abortSignal) {
     const abortHandler = () => {
-      log(`raw-exec: abort signal received – killing child ${child.pid}`);
+      if (isLoggingEnabled()) {
+        log(`raw-exec: abort signal received – killing child ${child.pid}`);
+      }
       const killTarget = (signal: NodeJS.Signals) => {
         if (!child.pid) {
           return;
@@ -142,14 +148,37 @@ export function exec(
   // resolve the promise and translate the failure into a regular
   // ExecResult object so the rest of the agent loop can carry on gracefully.
 
-  return new Promise<ExecResult>((resolve) => {
-    // Collect stdout and stderr up to configured limits.
-    const stdoutCollector = createTruncatingCollector(child.stdout!);
-    const stderrCollector = createTruncatingCollector(child.stderr!);
+  const stdoutChunks: Array<Buffer> = [];
+  const stderrChunks: Array<Buffer> = [];
+  let numStdoutBytes = 0;
+  let numStderrBytes = 0;
+  let hitMaxStdout = false;
+  let hitMaxStderr = false;
 
+  return new Promise<ExecResult>((resolve) => {
+    child.stdout?.on("data", (data: Buffer) => {
+      if (!hitMaxStdout) {
+        numStdoutBytes += data.length;
+        if (numStdoutBytes <= MAX_BUFFER) {
+          stdoutChunks.push(data);
+        } else {
+          hitMaxStdout = true;
+        }
+      }
+    });
+    child.stderr?.on("data", (data: Buffer) => {
+      if (!hitMaxStderr) {
+        numStderrBytes += data.length;
+        if (numStderrBytes <= MAX_BUFFER) {
+          stderrChunks.push(data);
+        } else {
+          hitMaxStderr = true;
+        }
+      }
+    });
     child.on("exit", (code, signal) => {
-      const stdout = stdoutCollector.getString();
-      const stderr = stderrCollector.getString();
+      const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+      const stderr = Buffer.concat(stderrChunks).toString("utf8");
 
       // Map (code, signal) to an exit code. We expect exactly one of the two
       // values to be non-null, but we code defensively to handle the case where
@@ -165,61 +194,24 @@ export function exec(
         exitCode = 1;
       }
 
-      log(
-        `raw-exec: child ${child.pid} exited code=${exitCode} signal=${signal}`,
-      );
-
-      const execResult = {
+      if (isLoggingEnabled()) {
+        log(
+          `raw-exec: child ${child.pid} exited code=${exitCode} signal=${signal}`,
+        );
+      }
+      resolve({
         stdout,
         stderr,
         exitCode,
-      };
-      resolve(
-        addTruncationWarningsIfNecessary(
-          execResult,
-          stdoutCollector.hit,
-          stderrCollector.hit,
-        ),
-      );
+      });
     });
 
     child.on("error", (err) => {
-      const execResult = {
+      resolve({
         stdout: "",
         stderr: String(err),
         exitCode: 1,
-      };
-      resolve(
-        addTruncationWarningsIfNecessary(
-          execResult,
-          stdoutCollector.hit,
-          stderrCollector.hit,
-        ),
-      );
+      });
     });
   });
-}
-
-/**
- * Adds a truncation warnings to stdout and stderr, if appropriate.
- */
-function addTruncationWarningsIfNecessary(
-  execResult: ExecResult,
-  hitMaxStdout: boolean,
-  hitMaxStderr: boolean,
-): ExecResult {
-  if (!hitMaxStdout && !hitMaxStderr) {
-    return execResult;
-  } else {
-    const { stdout, stderr, exitCode } = execResult;
-    return {
-      stdout: hitMaxStdout
-        ? stdout + "\n\n[Output truncated: too many lines or bytes]"
-        : stdout,
-      stderr: hitMaxStderr
-        ? stderr + "\n\n[Output truncated: too many lines or bytes]"
-        : stderr,
-      exitCode,
-    };
-  }
 }

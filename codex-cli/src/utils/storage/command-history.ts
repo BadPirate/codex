@@ -1,13 +1,12 @@
-import { log } from "../logger/log.js";
 import { existsSync } from "fs";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
 
 const HISTORY_FILE = path.join(os.homedir(), ".codex", "history.json");
-const DEFAULT_HISTORY_SIZE = 10_000;
+const DEFAULT_HISTORY_SIZE = 1000;
 
-// Regex patterns for sensitive commands that should not be saved.
+// Regex patterns for sensitive commands that should not be saved
 const SENSITIVE_PATTERNS = [
   /\b[A-Za-z0-9-_]{20,}\b/, // API keys and tokens
   /\bpassword\b/i,
@@ -19,7 +18,7 @@ const SENSITIVE_PATTERNS = [
 export interface HistoryConfig {
   maxSize: number;
   saveHistory: boolean;
-  sensitivePatterns: Array<string>; // Regex patterns.
+  sensitivePatterns: Array<string>; // Array of regex patterns as strings
 }
 
 export interface HistoryEntry {
@@ -33,6 +32,9 @@ export const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
   sensitivePatterns: [],
 };
 
+/**
+ * Loads command history from the history file
+ */
 export async function loadCommandHistory(): Promise<Array<HistoryEntry>> {
   try {
     if (!existsSync(HISTORY_FILE)) {
@@ -43,21 +45,26 @@ export async function loadCommandHistory(): Promise<Array<HistoryEntry>> {
     const history = JSON.parse(data) as Array<HistoryEntry>;
     return Array.isArray(history) ? history : [];
   } catch (error) {
-    log(`error: failed to load command history: ${error}`);
+    // Use error logger but for production would use a proper logging system
+    // eslint-disable-next-line no-console
+    console.error("Failed to load command history:", error);
     return [];
   }
 }
 
+/**
+ * Saves command history to the history file
+ */
 export async function saveCommandHistory(
   history: Array<HistoryEntry>,
   config: HistoryConfig = DEFAULT_HISTORY_CONFIG,
 ): Promise<void> {
   try {
-    // Create directory if it doesn't exist.
+    // Create directory if it doesn't exist
     const dir = path.dirname(HISTORY_FILE);
     await fs.mkdir(dir, { recursive: true });
 
-    // Trim history to max size.
+    // Trim history to max size
     const trimmedHistory = history.slice(-config.maxSize);
 
     await fs.writeFile(
@@ -66,10 +73,14 @@ export async function saveCommandHistory(
       "utf-8",
     );
   } catch (error) {
-    log(`error: failed to save command history: ${error}`);
+    // eslint-disable-next-line no-console
+    console.error("Failed to save command history:", error);
   }
 }
 
+/**
+ * Adds a command to history if it's not sensitive
+ */
 export async function addToHistory(
   command: string,
   history: Array<HistoryEntry>,
@@ -79,41 +90,46 @@ export async function addToHistory(
     return history;
   }
 
-  // Skip commands with sensitive information.
-  if (commandHasSensitiveInfo(command, config.sensitivePatterns)) {
+  // Check if command contains sensitive information
+  if (isSensitiveCommand(command, config.sensitivePatterns)) {
     return history;
   }
 
-  // Check for duplicate (don't add if it's the same as the last command).
+  // Check for duplicate (don't add if it's the same as the last command)
   const lastEntry = history[history.length - 1];
   if (lastEntry && lastEntry.command === command) {
     return history;
   }
 
-  // Add new entry.
-  const newHistory: Array<HistoryEntry> = [
-    ...history,
-    {
-      command,
-      timestamp: Date.now(),
-    },
-  ];
+  // Add new entry
+  const newEntry: HistoryEntry = {
+    command,
+    timestamp: Date.now(),
+  };
+
+  const newHistory = [...history, newEntry];
+
+  // Save to file
   await saveCommandHistory(newHistory, config);
+
   return newHistory;
 }
 
-function commandHasSensitiveInfo(
+/**
+ * Checks if a command contains sensitive information
+ */
+function isSensitiveCommand(
   command: string,
   additionalPatterns: Array<string> = [],
 ): boolean {
-  // Check built-in patterns.
+  // Check built-in patterns
   for (const pattern of SENSITIVE_PATTERNS) {
     if (pattern.test(command)) {
       return true;
     }
   }
 
-  // Check additional patterns from config.
+  // Check additional patterns from config
   for (const patternStr of additionalPatterns) {
     try {
       const pattern = new RegExp(patternStr);
@@ -121,19 +137,23 @@ function commandHasSensitiveInfo(
         return true;
       }
     } catch (error) {
-      // Invalid regex pattern, skip it.
+      // Invalid regex pattern, skip it
     }
   }
 
   return false;
 }
 
+/**
+ * Clears the command history
+ */
 export async function clearCommandHistory(): Promise<void> {
   try {
     if (existsSync(HISTORY_FILE)) {
       await fs.writeFile(HISTORY_FILE, JSON.stringify([]), "utf-8");
     }
   } catch (error) {
-    log(`error: failed to clear command history: ${error}`);
+    // eslint-disable-next-line no-console
+    console.error("Failed to clear command history:", error);
   }
 }
