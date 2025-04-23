@@ -2,12 +2,21 @@
 set -euo pipefail  # Exit on error, undefined vars, and pipeline failures
 IFS=$'\n\t'       # Stricter word splitting
 
+#!/bin/bash
+#
+# init_firewall.sh - set up restrictive iptables firewall inside container
+#
 # Dangerous flag to allow outbound traffic without restrictions
 ALLOW_OUTBOUND=false
+# Flag to relax forwarding when running Docker-in-Docker
+ALLOW_DIND=false
 for arg in "$@"; do
     case "$arg" in
         --dangerously-allow-network-outbound)
             ALLOW_OUTBOUND=true
+            ;;
+        --allow-docker-in-docker)
+            ALLOW_DIND=true
             ;;
         *)
             echo "Unknown option: $arg"
@@ -72,7 +81,14 @@ iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
 
 # Set default policies
 iptables -P INPUT DROP
-iptables -P FORWARD DROP
+# Allow or drop forwarding based on Docker-in-Docker mode
+if [ "$ALLOW_DIND" = true ]; then
+  echo "DIND mode: allowing container-to-container forwarding"
+  iptables -P FORWARD ACCEPT
+else
+  iptables -P FORWARD DROP
+fi
+# Allow or drop outbound based on flag
 if [ "$ALLOW_OUTBOUND" = true ]; then
   iptables -P OUTPUT ACCEPT
 else
@@ -97,8 +113,11 @@ if [ "$ALLOW_OUTBOUND" != true ]; then
   iptables -A OUTPUT -p tcp -j REJECT --reject-with tcp-reset
   iptables -A OUTPUT -p udp -j REJECT --reject-with icmp-port-unreachable
 fi
-iptables -A FORWARD -p tcp -j REJECT --reject-with tcp-reset
-iptables -A FORWARD -p udp -j REJECT --reject-with icmp-port-unreachable
+## Conditionally reject forwarded packets when not in DIND mode
+if [ "$ALLOW_DIND" != true ]; then
+  iptables -A FORWARD -p tcp -j REJECT --reject-with tcp-reset
+  iptables -A FORWARD -p udp -j REJECT --reject-with icmp-port-unreachable
+fi
 
 echo "Firewall configuration complete"
 # Skip verification if outbound is allowed
