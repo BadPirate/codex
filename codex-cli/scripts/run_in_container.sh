@@ -2,12 +2,20 @@
 set -e
 
 # Usage:
-#   ./run_in_container.sh [--dangerously-allow-network-outbound] [--dangerously-allow-sudo] [--dangerously-allow-install] [--work_dir directory] "COMMAND"
+#   ./run_in_container.sh [OPTIONS] "COMMAND"
 #
-#   Examples:
-#     ./run_in_container.sh --work_dir project/code "ls -la"
-#     ./run_in_container.sh "echo Hello, world!"
-#     ./run_in_container.sh --dangerously-allow-install --work_dir project/code "npm install"
+# Options:
+#   --dangerously-allow-network-outbound   Allow unrestricted outbound network traffic inside the container.
+#   --dangerously-allow-sudo              Allow sudo execution inside the container (via the 'sudonode' user).
+#   --dangerously-allow-install           Allow both outbound network and sudo execution, and enable Docker-in-Docker.
+#   --allow-docker-in-docker              Enable Docker-in-Docker (nested Docker daemon).
+#   --work_dir <directory>                Specify the working directory to mount inside the container (default: current directory).
+#
+# Examples:
+#   ./run_in_container.sh "echo Hello, world!"
+#   ./run_in_container.sh --work_dir /path/to/project "ls -la"
+#   ./run_in_container.sh --dangerously-allow-install --work_dir /path/to/project "npm install"
+#   ./run_in_container.sh --allow-docker-in-docker "docker ps"
 
 # Default the work directory to WORKSPACE_ROOT_DIR if not provided.
 WORK_DIR="${WORKSPACE_ROOT_DIR:-$(pwd)}"
@@ -77,7 +85,9 @@ trap cleanup EXIT
 
 # Ensure a command is provided.
 if [ "$#" -eq 0 ]; then
-  echo "Usage: $0 [--dangerously-allow-network-outbound] [--dangerously-allow-sudo] [--dangerously-allow-install] [--work_dir directory] \"COMMAND\""
+  echo "Usage: $0 [OPTIONS] \"COMMAND\""
+  echo "Run a command inside a Docker container with optional configurations."
+  echo "Use --help for more details."
   exit 1
 fi
 
