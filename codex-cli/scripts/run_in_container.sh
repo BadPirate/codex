@@ -116,11 +116,17 @@ if [ "$ALLOW_DIND" = true ]; then
      > /var/log/dockerd.log 2>&1 &"
 fi
 
-# Initialize the firewall inside the container, with optional allow-outbound flag
+## Initialize and configure the firewall inside the container
 FIREWALL_CMD="sudo /usr/local/bin/init_firewall.sh"
+# allow outbound network if requested
 if [ "$ALLOW_OUTBOUND" = true ]; then
   echo "Allowing outbound network access inside container..."
   FIREWALL_CMD+=" --dangerously-allow-network-outbound"
+fi
+# relax forwarding when running Docker-in-Docker
+if [ "$ALLOW_DIND" = true ]; then
+  echo "Allowing Docker-in-Docker internal container forwarding..."
+  FIREWALL_CMD+=" --allow-docker-in-docker"
 fi
 
 echo "Initializing firewall inside container..."
